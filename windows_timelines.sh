@@ -3,14 +3,14 @@
 trap "exit 1" TERM
 export TOP_PID=$$
 
-RIP='perl /home/jasa/work/development/RegRipper3.0/rip.pl'
+RIP='regripper'
 
 function tln2csv {
 	egrep '^[0-9]+\|' | awk -F '|' '{OFS="|";print 0,$5,0,0,0,0,0,-1,$1,-1,-1}' |mactime2 -b - -d 
 }
 
 function usage {
-    echo "Usage: $0 [options] [<windows_mount_dir>}"
+    echo "Usage: $0 [options] [<windows_mount_dir>] [<output_dir>]"
 		echo ""
 		echo "Options:"
 		echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
@@ -45,7 +45,7 @@ done
 
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
 
-if [ $# -ne "1" ]; then
+if [ $# -ne "2" ]; then
     usage
     exit 1
 fi
@@ -54,10 +54,10 @@ fi
 #
 # Check required tools
 #
-#if ! command -v "${RIP}" &>/dev/null; then
-#    echo "missing RegRipper; please install RegRipper to ${RIP}" >&2
-#    exit 1
-#fi
+if ! command -v "${RIP}" &>/dev/null; then
+    echo "missing RegRipper; please install RegRipper to ${RIP}" >&2
+    exit 1
+fi
 
 if ! command -v "mactime2" &>/dev/null; then
     echo "missing mactime2; please run `cargo install mactime2`" >&2
@@ -124,7 +124,7 @@ function do_timeline {
     
     echo "[+] creating timeline for '$BASENAME'" >&2
     
-    $RIP -r "$FILE" -aT 2>/dev/null | egrep '^[0-9]+\|' | tln2csv >"tln_$BASENAME.csv"
+    $RIP -r "$FILE" -aT 2>/dev/null | egrep '^[0-9]+\|' | tln2csv > "$OUTDIR/tln_$BASENAME.csv"
     BASENAME=
 }
 ###########################################################
@@ -138,14 +138,14 @@ function do_timeline {
 function host_info {
     SYSTEM="$1"
     SOFTWARE="$2"
-    ${RIP} -r "$SYSTEM" -p compname > compname.txt
-    ${RIP} -r "$SYSTEM" -p timezone > timezone.txt
+    ${RIP} -r "$SYSTEM" -p compname > "$OUTDIR/compname.txt"
+    ${RIP} -r "$SYSTEM" -p timezone > "$OUTDIR/timezone.txt"
 
-    ${RIP} -r "$SOFTWARE" -p msis > installed_software.txt
-    ${RIP} -r "$SOFTWARE" -p winver > winver.txt
+    ${RIP} -r "$SOFTWARE" -p msis > "$OUTDIR/installed_software.txt"
+    ${RIP} -r "$SOFTWARE" -p winver > "$OUTDIR/winver.txt"
 
-    ${RIP} -r "$SYSTEM" -p usbstor > usbstor.txt
-    ${RIP} -r "$SYSTEM" -p mountdev2 > mounted_devices.txt
+    ${RIP} -r "$SYSTEM" -p usbstor > "$OUTDIR/usbstor.txt"
+    ${RIP} -r "$SYSTEM" -p mountdev2 > "$OUTDIR/mounted_devices.txt"
 }
 ###########################################################
 
@@ -159,8 +159,8 @@ function user_info {
     USER="$1"
     NTUSER_DAT="$2"
 
-    ${RIP} -r "$NTUSER_DAT" -p run > "${USER}_run.txt"
-    ${RIP} -r "$NTUSER_DAT" -p cmdproc > "${USER}_cmdproc.txt"
+    ${RIP} -r "$NTUSER_DAT" -p run > "$OUTDIR/${USER}_run.txt"
+    ${RIP} -r "$NTUSER_DAT" -p cmdproc > "$OUTDIR/${USER}_cmdproc.txt"
 }
 ###########################################################
 
@@ -203,7 +203,7 @@ function registry_timeline {
 	HIVE=$(basename "$FILE")
 	if [ -r "$FILE" ]; then
 		echo "[+] creating a timeline of '$HIVE'" >&2
-		regdump -b "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "regtln_${HIVE}.csv"
+		regdump -b "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "$OUTDIR/regtln_${HIVE}.csv"
 	else
 		echo "[-] file '$FILE' not found" >&2
 	fi
@@ -219,15 +219,21 @@ function registry_timeline {
 function evtx_timeline {
 	LOGS_PATH="$1"
   echo "[+] creating windows evtx timeline" >&2
-  evtx2bodyfile "$LOGS_PATH/"*.evtx | mactime2 -d | gzip -c - >evtx.csv.gz
+  evtx2bodyfile "$LOGS_PATH/"*.evtx | mactime2 -d | gzip -c - > "$OUTDIR/evtx.csv.gz"
 }
 ###########################################################
 
 
 WIN_MOUNT=`realpath "$1"`
+OUTDIR=`realpath "$2"`
 
 if [ ! -d "$WIN_MOUNT" ]; then 
     echo "'$WIN_MOUNT' is not a directory" >&2
+    exit 1
+fi
+
+if [ ! -d "$OUTDIR" ]; then 
+    echo "'$OUTDIR' is not a directory" >&2
     exit 1
 fi
 
