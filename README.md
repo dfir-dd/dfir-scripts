@@ -21,14 +21,15 @@ Extract different windows artefacts from mounted source:
 
 *Required Tools:* 
 - dfir-toolkit (`cargo install dfir-toolkit`)
-- [Regripper](https://github.com/keydet89/RegRipper3.0) 
+- [Regripper](https://github.com/keydet89/RegRipper3.0) -> if necessary adjust the script variable "RIP"
+- [hayabusa](https://github.com/Yamato-Security/hayabusa) -> in folder hayabusa
+  - run `.\hayabusa update-rules`
 
 **Usage**
 ```
 Usage: windows-timeline.sh [options] [<windows_mount_dir>] [<output_dir>]
 
 Options:
-    -t <timezone>    convert timestamps from UTC to the given timezone
     -l               list availabel timezones
     -h               show this help information
 ```

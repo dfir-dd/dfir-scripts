@@ -4,6 +4,7 @@ trap "exit 1" TERM
 export TOP_PID=$$
 
 RIP='regripper'
+HAYABUSA='./hayabusa/hayabusa'
 
 function tln2csv {
 	egrep '^[0-9]+\|' | awk -F '|' '{OFS="|";print 0,$5,0,0,0,0,0,-1,$1,-1,-1}' |mactime2 -b - -d 
@@ -13,7 +14,7 @@ function usage {
     echo "Usage: $0 [options] [<windows_mount_dir>] [<output_dir>]"
 		echo ""
 		echo "Options:"
-		echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
+		#echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
 		echo "    -l               list availabel timezones"
 		echo "    -h               show this help information"
 }
@@ -66,6 +67,11 @@ fi
 
 if ! command -v "regdump" &>/dev/null; then
     echo "missing regdump; please run `cargo install nt_hive2`" >&2
+    exit 1
+fi
+
+if ! command -v "${HAYABUSA}" &>/dev/null; then
+    echo "missing hayabusa; please install hayabusa and add it to PATH variable" >&2
     exit 1
 fi
 ###########################################################
@@ -198,12 +204,14 @@ function copy_user_file {
 #
 # registry_timeline <hive_file>
 #
+# TODO: mactime2 Fehler mit -t Parameter -> Issue eingestellt
+#
 function registry_timeline {
 	FILE="$1"
 	HIVE=$(basename "$FILE")
 	if [ -r "$FILE" ]; then
 		echo "[+] creating a timeline of '$HIVE'" >&2
-		regdump -b "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "$OUTDIR/regtln_${HIVE}.csv"
+		regdump -b "$FILE" | mactime2 -b - -d > "$OUTDIR/regtln_${HIVE}.csv"
 	else
 		echo "[-] file '$FILE' not found" >&2
 	fi
@@ -223,6 +231,22 @@ function evtx_timeline {
 }
 ###########################################################
 
+###########################################################
+#
+# Usage:
+#
+# hayabusa <logs_path>
+#
+# TODO: logon-summary funktioniert auf der rulebase noch nicht
+#
+function hayabusa {
+  LOGS_PATH="$1"
+  echo "[+] creating hayabusa output" >&2
+  $HAYABUSA csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q
+  $HAYABUSA logon-summary -d "$LOGS_PATH" -o "$OUTDIR/hayabusa" -U 
+}
+###########################################################
+
 
 WIN_MOUNT=`realpath "$1"`
 OUTDIR=`realpath "$2"`
@@ -233,8 +257,7 @@ if [ ! -d "$WIN_MOUNT" ]; then
 fi
 
 if [ ! -d "$OUTDIR" ]; then 
-    echo "'$OUTDIR' is not a directory" >&2
-    exit 1
+    mkdir $OUTDIR
 fi
 
 SYSTEM="$(check_file "$WIN_MOUNT/Windows/System32/config/SYSTEM" true)"
@@ -284,4 +307,6 @@ while IFS= read -r D; do
 
 done < <(find "$WIN_MOUNT/Users" -maxdepth 1 -mindepth 1 -type d)
 
-evtx_timeline "$WIN_MOUNT/Windows/System32/winevt/Logs"
+#evtx_timeline "$WIN_MOUNT/Windows/System32/winevt/Logs"
+
+hayabusa "$WIN_MOUNT/Windows/System32/winevt/Logs"
