@@ -5,6 +5,7 @@ export TOP_PID=$$
 
 RIP='regripper'
 HAYABUSA='./hayabusa/hayabusa'
+SFS_ON=false
 
 function tln2csv {
 	egrep '^[0-9]+\|' | awk -F '|' '{OFS="|";print 0,$5,0,0,0,0,0,-1,$1,-1,-1}' |mactime2 -b - -d 
@@ -15,7 +16,8 @@ function usage {
 		echo ""
 		echo "Options:"
 		#echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
-		echo "    -l               list availabel timezones"
+		echo "    -e               extract win event logs in squshfs container"
+        echo "    -l               list availabel timezones"
 		echo "    -h               show this help information"
 }
 
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
 		shift
 		shift
 	;;
+    -e)
+        SFS_ON=true
+        shift
+    ;;
 	-l)
 		mactime2 -t list
 		exit 0
@@ -71,7 +77,12 @@ if ! command -v "regdump" &>/dev/null; then
 fi
 
 if ! command -v "${HAYABUSA}" &>/dev/null; then
-    echo "missing hayabusa; please install hayabusa and add it to PATH variable" >&2
+    echo "missing hayabusa; please install hayabusa" >&2
+    exit 1
+fi
+
+if ! command -v "mksquashfs" &>/dev/null; then
+    echo "missing hayabusa; please run `sudo apt install squashfs-tools`" >&2
     exit 1
 fi
 ###########################################################
@@ -307,6 +318,10 @@ while IFS= read -r D; do
 
 done < <(find "$WIN_MOUNT/Users" -maxdepth 1 -mindepth 1 -type d)
 
-#evtx_timeline "$WIN_MOUNT/Windows/System32/winevt/Logs"
+if [ $SFS_ON == true ]; then
+    mksquashfs "$WIN_MOUNT/Windows/System32/winevt/Logs" "$OUTDIR/evtx.sqfs"
+fi
+
+evtx_timeline "$WIN_MOUNT/Windows/System32/winevt/Logs"
 
 hayabusa "$WIN_MOUNT/Windows/System32/winevt/Logs"
