@@ -17,7 +17,7 @@ function usage {
 		echo "Options:"
 		#echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
 		echo "    -e               extract win event logs in squshfs container"
-        echo "    -l               list availabel timezones"
+        	echo "    -l               list available timezones"
 		echo "    -h               show this help information"
 }
 
