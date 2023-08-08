@@ -24,10 +24,11 @@ Extract different windows artefacts from mounted source:
 - [dfir-toolkit](https://github.com/dfir-dd/dfir-toolkit) (`cargo install dfir-toolkit`)
 - [Regripper](https://github.com/keydet89/RegRipper3.0) -> if necessary adjust the script variable "RIP"
 - [hayabusa](https://github.com/Yamato-Security/hayabusa) -> in folder hayabusa
-  - run `.\hayabusa update-rules`
 - squashfs (`sudo apt install squashfs-tools`)
 
 **Usage**
+
+Run `cd hayabusa` and `.\hayabusa update-rules` before the first execution :exclamation:
 ```
 Usage: windows-timeline.sh [options] [<windows_mount_dir>] [<output_dir>]
 
