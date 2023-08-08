@@ -34,7 +34,7 @@ Usage: windows-timeline.sh [options] [<windows_mount_dir>] [<output_dir>]
 
 Options:
     -e               extract event logs in squshfs container
-    -l               list availabel timezones
+    -l               list available timezones
     -h               show this help information
 ```
 
