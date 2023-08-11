@@ -31,10 +31,10 @@ while [[ $# -gt 0 ]]; do
 		shift
 		shift
 	;;
-    -e)
-        SFS_ON=true
-        shift
-    ;;
+    	-e)
+        	SFS_ON=true
+        	shift
+    	;;
 	-l)
 		mactime2 -t list
 		exit 0
@@ -81,7 +81,7 @@ if ! command -v "${HAYABUSA}" &>/dev/null; then
     exit 1
 fi
 
-if ! command -v "mksquashfs" &>/dev/null; then
+if [ ! command -v "mksquashfs" &>/dev/null ] && [ $SFS_ON == true ] ; then
     echo "missing hayabusa; please run `sudo apt install squashfs-tools`" >&2
     exit 1
 fi
@@ -215,7 +215,7 @@ function copy_user_file {
 #
 # registry_timeline <hive_file>
 #
-# TODO: mactime2 Fehler mit -t Parameter -> Issue eingestellt
+# TODO: mactime2 Fehler mit -t Parameter -> Pull-Request eingestellt
 #
 function registry_timeline {
 	FILE="$1"
@@ -248,13 +248,14 @@ function evtx_timeline {
 #
 # hayabusa <logs_path>
 #
-# TODO: logon-summary funktioniert auf der rulebase noch nicht
-#
 function hayabusa {
   LOGS_PATH="$1"
   echo "[+] creating hayabusa output" >&2
-  $HAYABUSA csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q
-  $HAYABUSA logon-summary -d "$LOGS_PATH" -o "$OUTDIR/hayabusa" -U 
+  $HAYABUSA csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q | tee "$OUTDIR/hayabusa_overview_tln.txt"
+  cd hayabusa
+ # ./hayabusa logon-summary -d "$LOGS_PATH" -o "$OUTDIR/hayabusa_logons" -U -Q -q
+  ./hayabusa logon-summary -d "$LOGS_PATH" -U -Q -q | tee "$OUTDIR/hayabusa_overview_logons.txt"
+  cd ..
 }
 ###########################################################
 
