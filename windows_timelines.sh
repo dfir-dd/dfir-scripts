@@ -15,7 +15,7 @@ function usage {
     echo "Usage: $0 [options] [<windows_mount_dir>] [<output_dir>]"
 		echo ""
 		echo "Options:"
-		#echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
+		echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
 		echo "    -e               extract win event logs in squshfs container"
         	echo "    -l               list available timezones"
 		echo "    -h               show this help information"
@@ -82,7 +82,7 @@ if ! command -v "${HAYABUSA}" &>/dev/null; then
 fi
 
 if [ ! command -v "mksquashfs" &>/dev/null ] && [ $SFS_ON == true ] ; then
-    echo "missing hayabusa; please run `sudo apt install squashfs-tools`" >&2
+    echo "missing squashfs; please run `sudo apt install squashfs-tools`" >&2
     exit 1
 fi
 ###########################################################
@@ -215,14 +215,12 @@ function copy_user_file {
 #
 # registry_timeline <hive_file>
 #
-# TODO: mactime2 Fehler mit -t Parameter -> Pull-Request eingestellt
-#
 function registry_timeline {
 	FILE="$1"
 	HIVE=$(basename "$FILE")
 	if [ -r "$FILE" ]; then
 		echo "[+] creating a timeline of '$HIVE'" >&2
-		regdump -b "$FILE" | mactime2 -b - -d > "$OUTDIR/regtln_${HIVE}.csv"
+		regdump -b "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "$OUTDIR/regtln_${HIVE}.csv"
 	else
 		echo "[-] file '$FILE' not found" >&2
 	fi
@@ -238,7 +236,7 @@ function registry_timeline {
 function evtx_timeline {
 	LOGS_PATH="$1"
   echo "[+] creating windows evtx timeline" >&2
-  evtx2bodyfile "$LOGS_PATH/"*.evtx | mactime2 -d | gzip -c - > "$OUTDIR/evtx.csv.gz"
+  evtx2bodyfile "$LOGS_PATH/"*.evtx | mactime2 -d -t "$TIMEZONE" | gzip -c - > "$OUTDIR/evtx.csv.gz"
 }
 ###########################################################
 
