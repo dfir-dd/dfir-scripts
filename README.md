@@ -21,14 +21,14 @@ Extract different windows artefacts from mounted source:
 - Timeline from windows event logs (via [evtx2bodyfile](https://github.com/dfir-dd/dfir-toolkit))
 - Windows Event Log Processing with [hayabusa](https://github.com/Yamato-Security/hayabusa) 
 
-*Required Tools:* 
+*Required Tools:* <br>
 Install the following tools to run the script successfully:
 - [dfir-toolkit](https://github.com/dfir-dd/dfir-toolkit) (`cargo install dfir-toolkit`)
 - [Regripper](https://github.com/keydet89/RegRipper3.0) -> if necessary adjust the variable "RIP" in the windows_timelines.sh script 
-<!---
+- squashfs (`sudo apt install squashfs-tools`)
+<!--- 
 - [hayabusa](https://github.com/Yamato-Security/hayabusa) -> in folder hayabusa
 -->
-- squashfs (`sudo apt install squashfs-tools`)
 
 **Usage**
 
