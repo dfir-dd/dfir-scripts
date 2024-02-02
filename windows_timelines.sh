@@ -3,9 +3,11 @@
 trap "exit 1" TERM
 export TOP_PID=$$
 
-RIP='regripper'
+RIP='rip'
 HAYABUSA='./hayabusa/hayabusa'
+CASEINSENSITIVE=false
 SFS_ON=false
+MFT=false
 
 function tln2csv {
 	egrep '^[0-9]+\|' | awk -F '|' '{OFS="|";print 0,$5,0,0,0,0,0,-1,$1,-1,-1}' |mactime2 -b - -d 
@@ -17,7 +19,9 @@ function usage {
 		echo "Options:"
 		echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
 		echo "    -e               extract win event logs in squshfs container"
-        	echo "    -l               list available timezones"
+        echo "    -i               switch to case-insensitive"
+        echo "    -m               parse mft"
+        echo "    -l               list available timezones"
 		echo "    -h               show this help information"
 }
 
@@ -31,10 +35,18 @@ while [[ $# -gt 0 ]]; do
 		shift
 		shift
 	;;
-    	-e)
-        	SFS_ON=true
-        	shift
-    	;;
+    -e)
+        SFS_ON=true
+        shift
+    ;;
+    -m)
+        MFT=true
+        shift
+    ;;
+    -i)
+        CASEINSENSITIVE=true
+        shift
+    ;;
 	-l)
 		mactime2 -t list
 		exit 0
@@ -67,7 +79,12 @@ if ! command -v "${RIP}" &>/dev/null; then
 fi
 
 if ! command -v "mactime2" &>/dev/null; then
-    echo "missing mactime2; please run `cargo install mactime2`" >&2
+    echo "missing mactime2; please run `cargo install dfir-toolkit`" >&2
+    exit 1
+fi
+
+if ! command -v "mft2bodyfile" &>/dev/null; then
+    echo "missing mft2bodyfile; please run `cargo install mft2bodyfile`" >&2
     exit 1
 fi
 
@@ -240,6 +257,20 @@ function evtx_timeline {
 }
 ###########################################################
 
+
+###########################################################
+#
+# Usage:
+#
+# mft_timeline
+#
+function mft_timeline {
+  echo "[+] creating mft timeline" >&2
+  mft2bodyfile "$WIN_MOUNT${DATAPATHS[10]}" | mactime2 -d -t "$TIMEZONE" | gzip -c - > "$OUTDIR/mft.csv.gz"
+}
+###########################################################
+
+
 ###########################################################
 #
 # Usage:
@@ -270,13 +301,22 @@ if [ ! -d "$OUTDIR" ]; then
     mkdir $OUTDIR
 fi
 
-SYSTEM="$(check_file "$WIN_MOUNT/Windows/System32/config/SYSTEM" true)"
-SOFTWARE="$(check_file "$WIN_MOUNT/Windows/System32/config/SOFTWARE" true)"
-SECURITY="$(check_file "$WIN_MOUNT/Windows/System32/config/SECURITY" true)"
-#SYSCACHE="$(check_file "$WIN_MOUNT/Windows/System32/config/Syscache.hve" true)"
-AMCACHE="$(check_file "$WIN_MOUNT/Windows/appcompat/Programs/Amcache.hve" false)"
+DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT")
+
+if [ $CASEINSENSITIVE == true ]; then
+    for i in "${!DATAPATHS[@]}"; do
+        DATAPATHS[$i]=$(echo "${DATAPATHS[$i]}" | tr '[:upper:]' '[:lower:]')
+    done        
+fi
+
+
+SYSTEM="$(check_file "$WIN_MOUNT${DATAPATHS[0]}" true)"
+SOFTWARE="$(check_file "$WIN_MOUNT${DATAPATHS[1]}" true)"
+SECURITY="$(check_file "$WIN_MOUNT${DATAPATHS[2]}" true)"
+#SYSCACHE="$(check_file "$WIN_MOUNT" "/Windows/System32/config/Syscache.hve" true)"
+AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[3]}" false)"
 if [ "x$AMCACHE" == "x" ]; then
-    AMCACHE="$(check_file "$WIN_MOUNT/Windows/AppCompat/Programs/Amcache.hve" false)"
+    AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[4]}" false)"
 fi
 
 host_info "$SYSTEM" "$SOFTWARE"
@@ -290,37 +330,41 @@ if [ "x$AMCACHE" != "x" ]; then
     do_timeline "$AMCACHE"
 fi
 
-if [ ! -d "$WIN_MOUNT/Users" ]; then
+if [ ! -d "$WIN_MOUNT${DATAPATHS[5]}" ]; then
     echo "[-] no Users directory found" >&2
-    exit 1
+    
+    while IFS= read -r D; do 
+        USER=$(basename $D)
+        USER_DIR=$(realpath "$D")
+        echo "[+] found user '$USER'"
+
+        NTUSER_DAT=$(check_file "$USER_DIR${DATAPATHS[6]}" false)
+        USRCLASS_DAT=$(check_file "$USER_DIR${DATAPATHS[7]}" false)
+        if [ "x$NTUSER_DAT" != "x" ]; then
+            do_timeline "$NTUSER_DAT" "${USER}_ntuser"
+            else
+                    echo "[-] missing file $NTUSER_DAT"
+        fi
+        if [ "x$USRCLASS_DAT" != "x" ]; then
+            do_timeline "$USRCLASS_DAT" "${USER}_usrclass"
+            else
+            echo "[-] missing file $USRCLASS_DAT"
+        fi
+
+        copy_user_file "$USER" "$USER_DIR" "${DATAPATHS[8]}"
+
+    done < <(find "$WIN_MOUNT/Users" -maxdepth 1 -mindepth 1 -type d)
 fi
 
-while IFS= read -r D; do 
-    USER=$(basename $D)
-    USER_DIR=$(realpath "$D")
-    echo "[+] found user '$USER'"
-
-    NTUSER_DAT=$(check_file "$USER_DIR/NTUSER.DAT" false)
-    USRCLASS_DAT=$(check_file "$USER_DIR/AppData/Local/Microsoft/Windows/UsrClass.dat" false)
-    if [ "x$NTUSER_DAT" != "x" ]; then
-        do_timeline "$NTUSER_DAT" "${USER}_ntuser"
-		else
-				echo "[-] missing file $NTUSER_DAT"
-    fi
-    if [ "x$USRCLASS_DAT" != "x" ]; then
-        do_timeline "$USRCLASS_DAT" "${USER}_usrclass"
-		else
-		echo "[-] missing file $USRCLASS_DAT"
-    fi
-
-	copy_user_file "$USER" "$USER_DIR" "ConsoleHost_history.txt"
-
-done < <(find "$WIN_MOUNT/Users" -maxdepth 1 -mindepth 1 -type d)
 
 if [ $SFS_ON == true ]; then
-    mksquashfs "$WIN_MOUNT/Windows/System32/winevt/Logs" "$OUTDIR/evtx.sqfs"
+    mksquashfs "$WIN_MOUNT${DATAPATHS[9]}" "$OUTDIR/evtx.sqfs"
 fi
 
-evtx_timeline "$WIN_MOUNT/Windows/System32/winevt/Logs"
+if [ $MFT == true ]; then
+    mft_timeline
+fi
 
-hayabusa "$WIN_MOUNT/Windows/System32/winevt/Logs"
+evtx_timeline "$WIN_MOUNT${DATAPATHS[9]}"
+
+hayabusa "$WIN_MOUNT${DATAPATHS[9]}"
