@@ -4,10 +4,13 @@ trap "exit 1" TERM
 export TOP_PID=$$
 
 RIP='rip'
-HAYABUSA='./hayabusa/hayabusa'
+#HAYABUSA='./hayabusa/hayabusa'
+HAYABUSA_ON=false
 CASEINSENSITIVE=false
 SFS_ON=false
 MFT=false
+PREFETCH=false
+TLN_PATH=$pwd
 
 function tln2csv {
 	egrep '^[0-9]+\|' | awk -F '|' '{OFS="|";print 0,$5,0,0,0,0,0,-1,$1,-1,-1}' |mactime2 -b - -d 
@@ -17,12 +20,13 @@ function usage {
     echo "Usage: $0 [options] [<windows_mount_dir>] [<output_dir>]"
 		echo ""
 		echo "Options:"
-		echo "    -t <timezone>    convert timestamps from UTC to the given timezone"
-		echo "    -e               extract win event logs in squshfs container"
-        echo "    -i               switch to case-insensitive"
-        echo "    -m               parse mft"
-        echo "    -l               list available timezones"
-		echo "    -h               show this help information"
+		echo "    -t <timezone>             convert timestamps from UTC to the given timezone"
+		echo "    -e                        extract win event logs in squshfs container"
+        echo "    -i                        switch to case-insensitive"
+        echo "    -m                        parse mft (expect \$MFT in Windows Root)"
+        echo "    -l                        list available timezones"
+        echo "    -ha <Hayabusa_Folder>     execute hayabusa (the rules should be in the same folder as the executable)"
+		echo "    -h                        show this help information"
 }
 
 POSITIONAL_ARGS=()
@@ -35,12 +39,22 @@ while [[ $# -gt 0 ]]; do
 		shift
 		shift
 	;;
+    -ha)
+        HAYABUSA_ON=true
+        HAYABUSA="$2"
+        shift
+        shift
+    ;;
     -e)
         SFS_ON=true
         shift
     ;;
     -m)
         MFT=true
+        shift
+    ;;
+    -p)
+        PREFETCH=true
         shift
     ;;
     -i)
@@ -93,7 +107,7 @@ if ! command -v "regdump" &>/dev/null; then
     exit 1
 fi
 
-if ! command -v "${HAYABUSA}" &>/dev/null; then
+if [! command -v "${HAYABUSA}" &>/dev/null ] && [ $HAYABUSA_ON == true ]; then
     echo "missing hayabusa; please install hayabusa" >&2
     exit 1
 fi
@@ -280,11 +294,11 @@ function mft_timeline {
 function hayabusa {
   LOGS_PATH="$1"
   echo "[+] creating hayabusa output" >&2
-  $HAYABUSA csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q | tee "$OUTDIR/hayabusa_overview_tln.txt"
-  cd hayabusa
+  cd $HAYABUSA
+  ./hayabusa csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q | tee "$OUTDIR/hayabusa_overview_tln.txt"
  # ./hayabusa logon-summary -d "$LOGS_PATH" -o "$OUTDIR/hayabusa_logons" -U -Q -q
   ./hayabusa logon-summary -d "$LOGS_PATH" -U -Q -q | tee "$OUTDIR/hayabusa_overview_logons.txt"
-  cd ..
+  cd $TLN_PATH
 }
 ###########################################################
 
@@ -301,7 +315,7 @@ if [ ! -d "$OUTDIR" ]; then
     mkdir $OUTDIR
 fi
 
-DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT")
+DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT" "/Windows/Prefetch")
 
 if [ $CASEINSENSITIVE == true ]; then
     for i in "${!DATAPATHS[@]}"; do
@@ -365,6 +379,15 @@ if [ $MFT == true ]; then
     mft_timeline
 fi
 
+if [ ! -d "$WIN_MOUNT${DATAPATHS[11]}" ]; then 
+    echo "[-] no prefetch files found" >&2
+else
+    echo "[+] creating prefetch timeline" >&2
+    pf2bodyfile "$WIN_MOUNT${DATAPATHS[11]}/"*.pf | mactime2 -d -t "$TIMEZONE" > "$OUTDIR/prefetch.csv"
+fi
+
 evtx_timeline "$WIN_MOUNT${DATAPATHS[9]}"
 
-hayabusa "$WIN_MOUNT${DATAPATHS[9]}"
+if [ $HAYABUSA_ON == true ]; then
+    hayabusa "$WIN_MOUNT${DATAPATHS[9]}"
+fi
