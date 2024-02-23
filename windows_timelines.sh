@@ -137,7 +137,13 @@ function check_file {
 
     if [ -r "$FILE" ]; then
         echo "[+] found '$FILE'" >&2
-        echo "$FILE"
+        if [[ "$FILE" == *" "* ]]; then
+            filename=$(basename "$FILE")
+            cp "$FILE" "$TEMP_DIR"
+            echo "$TEMP_DIR/$filename"
+        else
+            echo "$FILE"
+        fi
         exit
     fi
 
@@ -323,11 +329,12 @@ if [ $CASEINSENSITIVE == true ]; then
     done        
 fi
 
+TEMP_DIR=$(mktemp -d)
 
 SYSTEM="$(check_file "$WIN_MOUNT${DATAPATHS[0]}" true)"
 SOFTWARE="$(check_file "$WIN_MOUNT${DATAPATHS[1]}" true)"
 SECURITY="$(check_file "$WIN_MOUNT${DATAPATHS[2]}" true)"
-#SYSCACHE="$(check_file "$WIN_MOUNT" "/Windows/System32/config/Syscache.hve" true)"
+#SYSCACHE="$(check_file "$WIN_MOUNT/Windows/System32/config/Syscache.hve" true)"
 AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[3]}" false)"
 if [ "x$AMCACHE" == "x" ]; then
     AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[4]}" false)"
@@ -343,6 +350,9 @@ done
 if [ "x$AMCACHE" != "x" ]; then
     do_timeline "$AMCACHE"
 fi
+
+rm -r "$TEMP_DIR"
+
 
 if [ ! -d "$WIN_MOUNT${DATAPATHS[5]}" ]; then
     echo "[-] no Users directory found" >&2
