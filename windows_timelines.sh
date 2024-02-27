@@ -187,19 +187,27 @@ function do_timeline {
 #
 # Usage:
 #
-# host_info <path of SYSTEM hive> <path of SOFTWARE hive>
+# host_info <path of SYSTEM hive> <path of SOFTWARE hive> <path of SAM hive>
 #
 function host_info {
     SYSTEM="$1"
     SOFTWARE="$2"
+    SAM="$3"
     ${RIP} -r "$SYSTEM" -p compname > "$OUTDIR/compname.txt"
     ${RIP} -r "$SYSTEM" -p timezone > "$OUTDIR/timezone.txt"
+    ${RIP} -r "$SYSTEM" -p shutdown > "$OUTDIR/shutdown.txt"
+    ${RIP} -r "$SYSTEM" -p ips > "$OUTDIR/ip.txt"
+    ${RIP} -r "$SYSTEM" -p usbstor > "$OUTDIR/usbstor.txt"
+    ${RIP} -r "$SYSTEM" -p mountdev2 > "$OUTDIR/mounted_devices.txt"
 
     ${RIP} -r "$SOFTWARE" -p msis > "$OUTDIR/installed_software.txt"
     ${RIP} -r "$SOFTWARE" -p winver > "$OUTDIR/winver.txt"
-
-    ${RIP} -r "$SYSTEM" -p usbstor > "$OUTDIR/usbstor.txt"
-    ${RIP} -r "$SYSTEM" -p mountdev2 > "$OUTDIR/mounted_devices.txt"
+    ${RIP} -r "$SOFTWARE" -p profilelist > "$OUTDIR/profiles.txt"
+    ${RIP} -r "$SOFTWARE" -p lastloggedon > "$OUTDIR/lastloggedon.txt"
+    
+    ${RIP} -r "$SAM" -p samparse > "$OUTDIR/samparse.txt"
+    
+    
 }
 ###########################################################
 
@@ -321,7 +329,7 @@ if [ ! -d "$OUTDIR" ]; then
     mkdir $OUTDIR
 fi
 
-DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT" "/Windows/Prefetch")
+DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT" "/Windows/Prefetch" "/Windows/System32/config/SAM")
 
 if [ $CASEINSENSITIVE == true ]; then
     for i in "${!DATAPATHS[@]}"; do
@@ -336,11 +344,13 @@ SOFTWARE="$(check_file "$WIN_MOUNT${DATAPATHS[1]}" true)"
 SECURITY="$(check_file "$WIN_MOUNT${DATAPATHS[2]}" true)"
 #SYSCACHE="$(check_file "$WIN_MOUNT/Windows/System32/config/Syscache.hve" true)"
 AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[3]}" false)"
+SAM="$(check_file "$WIN_MOUNT${DATAPATHS[12]}" true)"
+
 if [ "x$AMCACHE" == "x" ]; then
     AMCACHE="$(check_file "$WIN_MOUNT${DATAPATHS[4]}" false)"
 fi
 
-host_info "$SYSTEM" "$SOFTWARE"
+host_info "$SYSTEM" "$SOFTWARE" "$SAM"
 
 for F in "$SYSTEM" "$SOFTWARE" "$SECURITY"; do
     do_timeline "$F"
