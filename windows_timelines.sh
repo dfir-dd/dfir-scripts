@@ -366,7 +366,7 @@ rm -r "$TEMP_DIR"
 
 if [ ! -d "$WIN_MOUNT${DATAPATHS[5]}" ]; then
     echo "[-] no Users directory found" >&2
-    
+else
     while IFS= read -r D; do 
         USER=$(basename $D)
         USER_DIR=$(realpath "$D")
