@@ -18,15 +18,15 @@ function tln2csv {
 
 function usage {
     echo "Usage: $0 [options] [<windows_mount_dir>] [<output_dir>]"
-		echo ""
-		echo "Options:"
-		echo "    -t <timezone>             convert timestamps from UTC to the given timezone"
-		echo "    -e                        extract win event logs in squshfs container"
-        echo "    -i                        switch to case-insensitive"
+	echo ""
+	echo "Options:"
+	echo "    -t <timezone>             convert timestamps from UTC to the given timezone"
+	echo "    -e                        extract win event logs in squshfs container"
+        echo "    -i                        switch to case-insensitive (necessary in case of dissect acquire output)"
         echo "    -m                        parse mft (expect \$MFT in Windows Root)"
         echo "    -l                        list available timezones"
         echo "    -ha <Hayabusa_Folder>     execute hayabusa (the rules should be in the same folder as the executable)"
-		echo "    -h                        show this help information"
+	echo "    -h                        show this help information"
 }
 
 POSITIONAL_ARGS=()
@@ -61,19 +61,19 @@ while [[ $# -gt 0 ]]; do
         CASEINSENSITIVE=true
         shift
     ;;
-	-l)
-		mactime2 -t list
-		exit 0
-	;;
-	-h)
-		usage
-		exit 0
-	;;
-	*)
-		POSITIONAL_ARGS+=("$1")
-		shift
-	;;
-	esac
+    -l)
+	mactime2 -t list
+	exit 0
+    ;;
+    -h)
+	usage
+	exit 0
+    ;;
+    *)
+	POSITIONAL_ARGS+=("$1")
+	shift
+    ;;
+    esac
 done
 
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
@@ -294,7 +294,11 @@ function evtx_timeline {
 #
 function mft_timeline {
   echo "[+] creating mft timeline" >&2
-  mft2bodyfile "$WIN_MOUNT${DATAPATHS[10]}" | mactime2 -d -t "$TIMEZONE" | gzip -c - > "$OUTDIR/mft.csv.gz"
+  if [ -f "$WIN_MOUNT${DATAPATHS[13]}" ]; then
+  	mft2bodyfile -J "$WIN_MOUNT${DATAPATHS[13]}" "$WIN_MOUNT${DATAPATHS[10]}" | mactime2 -d -t "$TIMEZONE" | gzip -c - > "$OUTDIR/mft_usnjrnl.csv.gz"
+  else
+  	mft2bodyfile "$WIN_MOUNT${DATAPATHS[10]}" | mactime2 -d -t "$TIMEZONE" | gzip -c - > "$OUTDIR/mft.csv.gz"	
+  fi
 }
 ###########################################################
 
@@ -329,7 +333,7 @@ if [ ! -d "$OUTDIR" ]; then
     mkdir $OUTDIR
 fi
 
-DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT" "/Windows/Prefetch" "/Windows/System32/config/SAM")
+DATAPATHS=("/Windows/System32/config/SYSTEM" "/Windows/System32/config/SOFTWARE" "/Windows/System32/config/SECURITY" "/Windows/appcompat/Programs/Amcache.hve" "/Windows/AppCompat/Programs/Amcache.hve" "/Users" "/NTUSER.DAT" "/AppData/Local/Microsoft/Windows/UsrClass.dat" "ConsoleHost_history.txt" "/Windows/System32/winevt/Logs" "/\$MFT" "/Windows/Prefetch" "/Windows/System32/config/SAM" "/\$Extend/\$UsnJrnl:\$J")
 
 if [ $CASEINSENSITIVE == true ]; then
     for i in "${!DATAPATHS[@]}"; do

@@ -20,7 +20,7 @@ Extract different windows artefacts from a mounted source:
 - Execution of [regdump](https://github.com/dfir-dd/dfir-toolkit/blob/main/doc/regdump.md) for additional timeline 
 - Timeline from windows event logs (via [evtx2bodyfile](https://github.com/dfir-dd/dfir-toolkit/blob/main/doc/evtx2bodyfile.md))
 - Windows Event Log Processing with [hayabusa](https://github.com/Yamato-Security/hayabusa)
-- Timeline from mft (via [mft2bodyfile](https://github.com/janstarke/mft2bodyfile))
+- Timeline from MFT and UsnJrnl (if exists) (via [mft2bodyfile](https://github.com/janstarke/mft2bodyfile))
 - Timeline from prefetch files, if they exists (via [pf2bodyfile](https://github.com/dfir-dd/dfir-toolkit/blob/main/doc/pf2bodyfile.md))
 
 *Required Tools:* <br>
@@ -44,7 +44,7 @@ Options:
     -e                      extract event logs in squshfs container
     -m                      parse mft (expect $MFT in Windows Root)
     -ha <Hayabusa_Folder>   execute hayabusa (the rules should be in the same folder as the executable)
-    -i                      switch to case-insensitive (for dissect acquire output)
+    -i                      switch to case-insensitive (necessary in case of dissect acquire output)
     -l                      list available timezones
     -h                      show this help information
 ```
