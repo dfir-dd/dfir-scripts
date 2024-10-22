@@ -94,6 +94,11 @@ if [ "$?" -ne "0" ]; then
   exit_with_error "you must be able to use sudo on any commands"
 fi
 
+sudo modprobe nbd
+if [ "$?" -ne "0" ]; then
+  exit_with_error "unable to load qemu-nbd module"
+fi
+
 ##
 ## mount tmpfs into /mnt, so that we can create our custom directory layout
 ##
