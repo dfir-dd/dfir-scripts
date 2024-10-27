@@ -244,7 +244,7 @@ function copy_user_file {
 
 		if [ -r "$F" ]; then
 			echo "[+] exfiltrating '$F' from user $USER" >&2
-			cp "$F" "$DSTFILE"
+			cp "$F" "$OUTDIR/${DSTFILE}"
 		else
 			echo "[-] file '$F' not found" >&2
 		fi
