@@ -4,7 +4,7 @@ trap "exit 1" TERM
 export TOP_PID=$$
 
 RIP='rip'
-#HAYABUSA='./hayabusa/hayabusa'
+HAYABUSA='./hayabusa/'
 HAYABUSA_ON=false
 CASEINSENSITIVE=false
 SFS_ON=false
@@ -22,10 +22,10 @@ function usage {
 	echo "Options:"
 	echo "    -t <timezone>             convert timestamps from UTC to the given timezone"
 	echo "    -e                        extract win event logs in squshfs container"
-        echo "    -i                        switch to case-insensitive (necessary in case of dissect acquire output)"
-        echo "    -m                        parse mft (expect \$MFT in Windows Root)"
-        echo "    -l                        list available timezones"
-        echo "    -ha <Hayabusa_Folder>     execute hayabusa (the rules should be in the same folder as the executable)"
+        echo "    -i                    switch to case-insensitive (necessary in case of dissect acquire output)"
+        echo "    -m                    parse mft (expect \$MFT in Windows Root)"
+        echo "    -l                    list available timezones"
+        echo "    -ha                   execute hayabusa"
 	echo "    -h                        show this help information"
 }
 
@@ -41,8 +41,6 @@ while [[ $# -gt 0 ]]; do
 	;;
     -ha)
         HAYABUSA_ON=true
-        HAYABUSA="$2"
-        shift
         shift
     ;;
     -e)
@@ -104,11 +102,6 @@ fi
 
 if ! command -v "regdump" &>/dev/null; then
     echo "missing regdump; please run `cargo install nt_hive2`" >&2
-    exit 1
-fi
-
-if [! command -v "${HAYABUSA}" &>/dev/null ] && [ $HAYABUSA_ON == true ]; then
-    echo "missing hayabusa; please install hayabusa" >&2
     exit 1
 fi
 
@@ -307,13 +300,16 @@ function mft_timeline {
 #
 # Usage:
 #
-# hayabusa <logs_path>
+# hayabusa <evtx_logs_path> 
 #
 function hayabusa {
   LOGS_PATH="$1"
   echo "[+] creating hayabusa output" >&2
   cd $HAYABUSA
-  ./hayabusa csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q | tee "$OUTDIR/hayabusa_overview_tln.txt"
+  if [ ! -d "rules" ]; then
+    ./hayabusa update-rules
+  fi
+  ./hayabusa csv-timeline -d "$LOGS_PATH" -o "$OUTDIR/tln_hayabusa.csv" -H "$OUTDIR/tln_hayabusa_summary.html" -U -q -w | tee "$OUTDIR/hayabusa_overview_tln.txt"
  # ./hayabusa logon-summary -d "$LOGS_PATH" -o "$OUTDIR/hayabusa_logons" -U -Q -q
   ./hayabusa logon-summary -d "$LOGS_PATH" -U -Q -q | tee "$OUTDIR/hayabusa_overview_logons.txt"
   cd $TLN_PATH
