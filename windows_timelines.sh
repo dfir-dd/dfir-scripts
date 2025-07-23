@@ -258,7 +258,7 @@ function registry_timeline {
 	HIVE=$(basename "$FILE")
 	if [ -r "$FILE" ]; then
 		echo "[+] creating a timeline of '$HIVE'" >&2
-		regdump -b "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "$OUTDIR/regtln_${HIVE}.csv"
+		regdump -F bodyfile "$FILE" | mactime2 -b - -d -t "$TIMEZONE" > "$OUTDIR/regtln_${HIVE}.csv"
 	else
 		echo "[-] file '$FILE' not found" >&2
 	fi
