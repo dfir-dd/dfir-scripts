@@ -100,7 +100,8 @@ class WindowsTimeline(object):
         self._files = {
             'SYSTEM': self.find_file("Windows/System32/config/SYSTEM"),
             'SOFTWARE': self.find_file("Windows/System32/config/SOFTWARE"),
-            'SAM': self.find_file("Windows/System32/config/SAM")
+            'SAM': self.find_file("Windows/System32/config/SAM"),
+            'Users': self.find_file("Users")
         }
         return self
 
@@ -110,6 +111,9 @@ class WindowsTimeline(object):
 
     def create(self):
         self.host_info()
+
+        for user_name, ntuser_dat in self.find_user_profiles():
+            self.user_info(user_name, ntuser_dat)
 
     def host_info(self):
         self._toolset.rip("-r", self._files['SYSTEM'], "-p", "compname", output="compname.txt")
@@ -125,6 +129,22 @@ class WindowsTimeline(object):
         self._toolset.rip("-r", self._files['SOFTWARE'], "-p", "lastloggedon", output="lastloggedon.txt")
 
         self._toolset.rip("-r", self._files['SAM'], "-p", "samparse", output="samparse.txt")
+
+    def user_info(self, user_name: str, ntuser_dat: Path):
+        self._toolset.rip("-r", ntuser_dat, "-p", "run", output=f"{user_name}_run.txt")
+        self._toolset.rip("-r", ntuser_dat, "-p", "cmdproc", output=f"{user_name}_cmdproc.txt")
+
+    def find_user_profiles(self) -> list[(str, Path)]:
+        results = list()
+        for d in [x for x in self._files['Users'].iterdir() if x.is_dir()]:
+            for nt_user_dat in [x for x in d.iterdir() if x.is_file()]:
+                if nt_user_dat.name.lower() == "ntuser.dat":
+                    user_name = d.name
+                    logging.info(f"found profile directory for user '{user_name}'")
+                    results.append((user_name, nt_user_dat))
+                    break
+        return results
+
 
     def find_file(self, expected_path: str, fail_if_missing: bool = True) -> Optional[Path]:
         path = self._windows_mount_dir / Path(expected_path)
