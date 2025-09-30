@@ -2,8 +2,10 @@
 import argparse
 import logging
 import os
+import re
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
 import subprocess
 from typing import Optional
@@ -30,20 +32,24 @@ class Tool(object):
                 return self
         raise MissingToolError(tool_name=tool_name, how_to_install=how_to_install)
 
-    def __call__(self, *args: str, output=Optional[Path]) -> str:
+    def __call__(self, *args: str, output: Optional[Path]=None, filter: Optional[Callable[[str], str]]=None, input: Optional[str]=None) -> str:
         args = list(args)
         args.insert(0, self._path)
-        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8")
+        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input)
         if completed_process.returncode != 0:
             logging.error(f"error while running command `{self._path} {args}`:")
             logging.error(completed_process.stderr)
             sys.exit(1)
 
+        result = completed_process.stdout
+        if filter is not None:
+            result = filter(result)
+
         if output is None:
-            return str(completed_process.stdout)
+            return str(result)
         else:
             with open(output, "w") as f:
-                f.write(completed_process.stdout)
+                f.write(result)
 
 
 class Toolset(object):
@@ -66,15 +72,15 @@ class Toolset(object):
         else:
             return self._output_dir / file_name
 
-    def rip(self, *args: str, output=Optional[Path]) -> str:
+    def rip(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
         if self._rip is None:
             self._rip = Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`')
-        return self._rip(*args, output=self.output(output))
+        return self._rip(*args, output=self.output(output), filter=filter)
 
-    def mactime2(self, *args: str) -> str:
+    def mactime2(self, *args: str, input: Optional[str] = None) -> str:
         if self._mactime2 is None:
             self._mactime2 = Tool('mactime2', how_to_install='run `cargo install dfir-toolkit')
-        return self._mactime2(*args)
+        return self._mactime2(*args, input=input)
 
     def regdump(self, *args: str) -> str:
         if self._regdump is None:
@@ -92,17 +98,25 @@ class Toolset(object):
         return self._mksquashfs(*args)
 
 
+def tln2csv(content: str, toolset: Toolset) -> str:
+    filtered_lines = [line.split("|") for line in content.splitlines() if re.match(r"^\d+\|\w+\|\|\|", line)]
+    content = os.linesep.join(["|".join(("0", line[4], "0", "0", "0", "0", "0", "-1", line[0], "-1", "-1")) for line in filtered_lines])
+    content = toolset.mactime2("-b", "-", "-d", input=content)
+    return content
+
+
 class WindowsTimeline(object):
     def __new__(cls, windows_mount_dir: Path, output_dir: Path):
         self = super(WindowsTimeline, cls).__new__(cls)
         self._windows_mount_dir = Path(windows_mount_dir)
         self._toolset = Toolset(output_dir)
-        self._files = {
+        self._registry_files = {
             'SYSTEM': self.find_file("Windows/System32/config/SYSTEM"),
             'SOFTWARE': self.find_file("Windows/System32/config/SOFTWARE"),
             'SAM': self.find_file("Windows/System32/config/SAM"),
-            'Users': self.find_file("Users")
+            'AMCACHE': self.find_file("Windows/AppCompat/Programs/Amcache.hve"),
         }
+        self._users_dir = self.find_file("Users")
         return self
 
     @classmethod
@@ -111,24 +125,31 @@ class WindowsTimeline(object):
 
     def create(self):
         self.host_info()
+        for reg_file in self._registry_files.values():
+            self.registry_timeline(reg_file)
 
         for user_name, ntuser_dat in self.find_user_profiles():
             self.user_info(user_name, ntuser_dat)
 
     def host_info(self):
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "compname", output="compname.txt")
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "timezone", output="timezone.txt")
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "shutdown", output="shutdown.txt")
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "ips", output="ips.txt")
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "usbstor", output="usbstor.txt")
-        self._toolset.rip("-r", self._files['SYSTEM'], "-p", "mountdev2", output="mountdev2.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "compname", output="compname.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "timezone", output="timezone.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "shutdown", output="shutdown.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "ips", output="ips.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "usbstor", output="usbstor.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "mountdev2", output="mountdev2.txt")
 
-        self._toolset.rip("-r", self._files['SOFTWARE'], "-p", "msis", output="msis.txt")
-        self._toolset.rip("-r", self._files['SOFTWARE'], "-p", "winver", output="winver.txt")
-        self._toolset.rip("-r", self._files['SOFTWARE'], "-p", "profilelist", output="profilelist.txt")
-        self._toolset.rip("-r", self._files['SOFTWARE'], "-p", "lastloggedon", output="lastloggedon.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "msis", output="msis.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "winver", output="winver.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "profilelist", output="profilelist.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "lastloggedon", output="lastloggedon.txt")
 
-        self._toolset.rip("-r", self._files['SAM'], "-p", "samparse", output="samparse.txt")
+        self._toolset.rip("-r", self._registry_files['SAM'], "-p", "samparse", output="samparse.txt")
+
+    def registry_timeline(self, reg_file: Path):
+        filename = reg_file.name
+        logging.info(f"creating regripper timeline for {filename} hive")
+        self._toolset.rip("-r", reg_file, "-aT", output=f"tln_{filename}.csv", filter=lambda s: tln2csv(s, self._toolset))
 
     def user_info(self, user_name: str, ntuser_dat: Path):
         self._toolset.rip("-r", ntuser_dat, "-p", "run", output=f"{user_name}_run.txt")
@@ -136,7 +157,7 @@ class WindowsTimeline(object):
 
     def find_user_profiles(self) -> list[(str, Path)]:
         results = list()
-        for d in [x for x in self._files['Users'].iterdir() if x.is_dir()]:
+        for d in [x for x in self._users_dir.iterdir() if x.is_dir()]:
             for nt_user_dat in [x for x in d.iterdir() if x.is_file()]:
                 if nt_user_dat.name.lower() == "ntuser.dat":
                     user_name = d.name
@@ -145,17 +166,23 @@ class WindowsTimeline(object):
                     break
         return results
 
-
     def find_file(self, expected_path: str, fail_if_missing: bool = True) -> Optional[Path]:
-        path = self._windows_mount_dir / Path(expected_path)
-        if path.exists():
-            logging.info(f"found '{expected_path}' in '{path}'")
-            return path
-        elif fail_if_missing:
-            raise FileNotFoundError(expected_path)
-        else:
-            logging.warn(f"file not found: '{expected_path}'")
-            return None
+        current_path = self._windows_mount_dir
+        for part in Path(expected_path).parts:
+            found = False
+            for item in current_path.iterdir():
+                # at first check for exact match
+                if part == item.name or part.lower() == item.name.lower():
+                    current_path /= item.name
+                    found = True
+                    break
+            if not found:
+                if fail_if_missing:
+                    raise FileNotFoundError(expected_path)
+                else:
+                    logging.warn(f"file not found: '{expected_path}'")
+                    return None
+        return current_path
 
 
 if __name__ == '__main__':
