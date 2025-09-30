@@ -82,20 +82,20 @@ class Toolset(object):
             self._mactime2 = Tool('mactime2', how_to_install='run `cargo install dfir-toolkit')
         return self._mactime2(*args, input=input)
 
-    def regdump(self, *args: str) -> str:
+    def regdump(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
         if self._regdump is None:
             self._regdump = Tool('regdump', how_to_install='run `cargo install nt_hive2')
-        return self._regdump(*args)
+        return self._regdump(*args, output=self.output(output), filter=filter)
 
-    def mft2bodyfile(self, *args: str) -> str:
+    def mft2bodyfile(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
         if self._mft2bodyfile is None:
             self._mft2bodyfile = Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile')
-        return self._mft2bodyfile(*args)
+        return self._mft2bodyfile(*args, output=self.output(output), filter=filter)
 
-    def mksquashfs(self, *args: str) -> str:
+    def mksquashfs(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
         if self._mksquashfs is None:
             self._mksquashfs = Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
-        return self._mksquashfs(*args)
+        return self._mksquashfs(*args, output=self.output(output), filter=filter)
 
 
 def tln2csv(content: str, toolset: Toolset) -> str:
@@ -132,28 +132,33 @@ class WindowsTimeline(object):
             self.user_info(user_name, ntuser_dat)
 
     def host_info(self):
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "compname", output="compname.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "timezone", output="timezone.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "shutdown", output="shutdown.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "ips", output="ips.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "usbstor", output="usbstor.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "mountdev2", output="mountdev2.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "compname", output="rip_compname.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "timezone", output="rip_timezone.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "shutdown", output="rip_shutdown.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "ips", output="rip_ips.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "usbstor", output="rip_usbstor.txt")
+        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "mountdev2", output="rip_mountdev2.txt")
 
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "msis", output="msis.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "winver", output="winver.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "profilelist", output="profilelist.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "lastloggedon", output="lastloggedon.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "msis", output="rip_msis.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "winver", output="rip_winver.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "profilelist", output="rip_profilelist.txt")
+        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "lastloggedon", output="rip_lastloggedon.txt")
 
-        self._toolset.rip("-r", self._registry_files['SAM'], "-p", "samparse", output="samparse.txt")
+        self._toolset.rip("-r", self._registry_files['SAM'], "-p", "samparse", output="rip_samparse.txt")
 
     def registry_timeline(self, reg_file: Path):
         filename = reg_file.name
         logging.info(f"creating regripper timeline for {filename} hive")
         self._toolset.rip("-r", reg_file, "-aT", output=f"tln_{filename}.csv", filter=lambda s: tln2csv(s, self._toolset))
+        logging.info(f"creating regdump timeline for {filename} hive")
+        self._toolset.regdump("-F", "bodyfile", reg_file, output=f"regtln_{filename}.csv", filter=lambda s: self._toolset.mactime2("-b", "-", "-d", input=s))
+
 
     def user_info(self, user_name: str, ntuser_dat: Path):
-        self._toolset.rip("-r", ntuser_dat, "-p", "run", output=f"{user_name}_run.txt")
-        self._toolset.rip("-r", ntuser_dat, "-p", "cmdproc", output=f"{user_name}_cmdproc.txt")
+        logging.info(f"creating regripper timeline for user {user_name}")
+        self._toolset.rip("-r", ntuser_dat, "-p", "run", output=f"rip_{user_name}_run.txt")
+        self._toolset.rip("-r", ntuser_dat, "-p", "cmdproc", output=f"rip_{user_name}_cmdproc.txt")
+        self._toolset.rip("-r", ntuser_dat, "-aT", output=f"tln_user_{user_name}.csv", filter=lambda s: tln2csv(s, self._toolset))
 
     def find_user_profiles(self) -> list[(str, Path)]:
         results = list()
