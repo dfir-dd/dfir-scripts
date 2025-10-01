@@ -24,14 +24,14 @@ class MissingToolError(Exception):
 
 
 class Tool:
-    def __init__(self, *tool_names: str, how_to_install: str):
-        if tool_names:
-            for tool_name in tool_names:
+    def __init__(self, *binary_names: str, how_to_install: str):
+        if binary_names:
+            for tool_name in binary_names:
                 path = shutil.which(tool_name)
                 if path is not None:
                     self._path = path
                     return
-            raise MissingToolError(tool_name=tool_names[0], how_to_install=how_to_install)
+            raise MissingToolError(tool_name=binary_names[0], how_to_install=how_to_install)
         else:
             raise ArgumentError(message="missing tool name", argument=None)
 
@@ -42,7 +42,7 @@ class Tool:
         args.insert(0, self._path)
         completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input_str)
         if completed_process.returncode != 0:
-            logging.error(f"error while running command `{self._path} {args}`:")
+            logging.error(f"error while running command `{args}`:")
             logging.error(completed_process.stderr)
             sys.exit(1)
 
@@ -59,12 +59,29 @@ class Tool:
 
 
 class Toolset:
+    def __init__(self, tools: dict[str, Tool]):
+        self.__tools = tools
+
+    def __call__(self, cls):
+        for name, tool in self.__tools.items():
+            def generate_runner(t: Tool):
+                def run_tool(self, *args: str, input_str: Optional[str] = None, output: Optional[str] = None,
+                         filter_function: Optional[Callable[[str], str]] = None) -> Optional[str]:
+                    return t(*args, input_str=input_str, output=self.output(output), filter_function=filter_function)
+                return run_tool
+            setattr(cls, name, generate_runner(tool))
+        return cls
+
+
+@Toolset({
+    'mactime2': Tool('mactime2', how_to_install='run `cargo install dfir-toolkit'),
+    'regdump': Tool('regdump', how_to_install='run `cargo install nt_hive2'),
+    'rip': Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`'),
+    #'mft2bodyfile': Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile'),
+    #'mksquashfs': Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
+})
+class TimelineToolset:
     def __init__(self, output_dir: Path):
-        self._rip = None
-        self._mactime2 = None
-        self._mft2bodyfile = None
-        self._regdump = None
-        self._mksquashfs = None
         self._output_dir = output_dir
 
     def output(self, file_name: Optional[str]) -> Optional[Path]:
@@ -73,37 +90,7 @@ class Toolset:
         else:
             return self._output_dir / file_name
 
-    def rip(self, *args: str, output: Optional[str] = None,
-            filter_function: Optional[Callable[[str], str]] = None) -> str:
-        if self._rip is None:
-            self._rip = Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`')
-        return self._rip(*args, output=self.output(output), filter_function=filter_function)
-
-    def mactime2(self, *args: str, input_str: Optional[str] = None) -> str:
-        if self._mactime2 is None:
-            self._mactime2 = Tool('mactime2', how_to_install='run `cargo install dfir-toolkit')
-        return self._mactime2(*args, input_str=input_str)
-
-    def regdump(self, *args: str, output: Optional[str] = None,
-                filter_function: Optional[Callable[[str], str]] = None) -> str:
-        if self._regdump is None:
-            self._regdump = Tool('regdump', how_to_install='run `cargo install nt_hive2')
-        return self._regdump(*args, output=self.output(output), filter_function=filter_function)
-
-    def mft2bodyfile(self, *args: str, output: Optional[str] = None,
-                     filter_function: Optional[Callable[[str], str]] = None) -> str:
-        if self._mft2bodyfile is None:
-            self._mft2bodyfile = Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile')
-        return self._mft2bodyfile(*args, output=self.output(output), filter_function=filter_function)
-
-    def mksquashfs(self, *args: str, output: Optional[str] = None,
-                   filter_function: Optional[Callable[[str], str]] = None) -> str:
-        if self._mksquashfs is None:
-            self._mksquashfs = Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
-        return self._mksquashfs(*args, output=self.output(output), filter_function=filter_function)
-
-
-def tln2csv(content: str, toolset: Toolset) -> str:
+def tln2csv(content: str, toolset: TimelineToolset) -> str:
     filtered_lines = [line.split("|") for line in content.splitlines() if re.match(r"^\d+\|\w+\|\|\|", line)]
     content = os.linesep.join(
         ["|".join(("0", line[4], "0", "0", "0", "0", "0", "-1", line[0], "-1", "-1")) for line in filtered_lines])
@@ -115,7 +102,7 @@ class WindowsTimeline(object):
     def __new__(cls, windows_mount_dir: Path, output_dir: Path):
         self = super(WindowsTimeline, cls).__new__(cls)
         self._windows_mount_dir = Path(windows_mount_dir)
-        self._toolset = Toolset(output_dir)
+        self._toolset = TimelineToolset(output_dir)
         self._registry_files = {
             'SYSTEM': self.find_file("Windows/System32/config/SYSTEM"),
             'SOFTWARE': self.find_file("Windows/System32/config/SOFTWARE"),
@@ -127,7 +114,7 @@ class WindowsTimeline(object):
 
     @classmethod
     def list_timezones(cls):
-        print(Toolset(Path("/")).mactime2("-t", "list"), end="")
+        print(TimelineToolset(Path("/")).mactime2("-t", "list"), end="")
 
     def create(self):
         self.host_info()
