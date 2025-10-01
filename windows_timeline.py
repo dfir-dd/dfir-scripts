@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import gzip
 import logging
 import os
 import re
@@ -36,7 +37,9 @@ class Tool:
             raise ArgumentError(message="missing tool name", argument=None)
 
     def __call__(self, *args: str, output: Optional[Path] = None,
-                 filter_function: Optional[Callable[[str], str]] = None, input_str: Optional[str] = None) -> Optional[
+                 filter_function: Optional[Callable[[str], str]] = None,
+                 input_str: Optional[str] = None,
+                 compress: bool = False) -> Optional[
         str]:
         args = list(args)
         args.insert(0, self._path)
@@ -53,8 +56,12 @@ class Tool:
         if output is None:
             return str(result)
         else:
-            with open(output, "w") as f:
-                f.write(result)
+            if compress:
+                with open(output.with_suffix(".gz"), "wb") as f:
+                    f.write(gzip.compress(result.encode("UTF-8"), 5))
+            else:
+                with open(output, "w") as f:
+                    f.write(result)
             return None
 
 
@@ -66,19 +73,24 @@ class Toolset:
         for name, tool in self.__tools.items():
             def generate_runner(t: Tool):
                 def run_tool(self, *args: str, input_str: Optional[str] = None, output: Optional[str] = None,
-                         filter_function: Optional[Callable[[str], str]] = None) -> Optional[str]:
-                    return t(*args, input_str=input_str, output=self.output(output), filter_function=filter_function)
+                             filter_function: Optional[Callable[[str], str]] = None,
+                             compress: bool = False) -> Optional[str]:
+                    return t(*args, input_str=input_str, output=self.output(output), filter_function=filter_function,
+                             compress=compress)
+
                 return run_tool
+
             setattr(cls, name, generate_runner(tool))
         return cls
 
 
 @Toolset({
     'mactime2': Tool('mactime2', how_to_install='run `cargo install dfir-toolkit'),
+    'evtx2bodyfile': Tool('evtx2bodyfile', how_to_install='run `cargo install dfir-toolkit'),
     'regdump': Tool('regdump', how_to_install='run `cargo install nt_hive2'),
     'rip': Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`'),
-    #'mft2bodyfile': Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile'),
-    #'mksquashfs': Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
+    # 'mft2bodyfile': Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile'),
+    # 'mksquashfs': Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
 })
 class TimelineToolset:
     def __init__(self, output_dir: Path):
@@ -89,6 +101,7 @@ class TimelineToolset:
             return None
         else:
             return self._output_dir / file_name
+
 
 def tln2csv(content: str, toolset: TimelineToolset) -> str:
     filtered_lines = [line.split("|") for line in content.splitlines() if re.match(r"^\d+\|\w+\|\|\|", line)]
@@ -110,6 +123,7 @@ class WindowsTimeline(object):
             'AMCACHE': self.find_file("Windows/AppCompat/Programs/Amcache.hve"),
         }
         self._users_dir = self.find_file("Users")
+        self._winevt_logs = self.find_file("Windows/System32/winevt/Logs")
         return self
 
     @classmethod
@@ -123,6 +137,7 @@ class WindowsTimeline(object):
 
         for user_name, ntuser_dat in self.find_user_profiles():
             self.user_info(user_name, ntuser_dat)
+        self.eventlog_timeline()
 
     def host_info(self):
         self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "compname", output="rip_compname.txt")
@@ -146,9 +161,10 @@ class WindowsTimeline(object):
         logging.info(f"creating regripper timeline for {filename} hive")
         self._toolset.rip("-r", str(reg_file), "-aT", output=f"tln_{filename}.csv",
                           filter_function=lambda s: tln2csv(s, self._toolset))
-        logging.info(f"creating regdump timeline for {filename} hive")
+        logging.info(f"creating compressed regdump timeline for {filename} hive")
         self._toolset.regdump("-F", "bodyfile", str(reg_file), output=f"regtln_{filename}.csv",
-                              filter_function=lambda s: self._toolset.mactime2("-b", "-", "-d", input_str=s))
+                              filter_function=lambda s: self._toolset.mactime2("-b", "-", "-d", input_str=s),
+                              compress=True)
 
     def user_info(self, user_name: str, ntuser_dat: Path):
         logging.info(f"creating regripper timeline for user {user_name}")
@@ -167,6 +183,14 @@ class WindowsTimeline(object):
                     results.append((user_name, nt_user_dat))
                     break
         return results
+
+    def eventlog_timeline(self):
+        evtx_files = [file for file in self._winevt_logs.iterdir() if
+                      file.is_file() and file.name.lower().endswith(".evtx")]
+        logging.info(f"creating timeline for {len(evtx_files)} eventlog files")
+        self._toolset.evtx2bodyfile(*evtx_files, output=f"tln_evtx.csv",
+                                    filter_function=lambda s: self._toolset.mactime2("-b", "-", "-d", input_str=s),
+                                    compress=True)
 
     def find_file(self, expected_path: str, fail_if_missing: bool = True) -> Optional[Path]:
         current_path = self._windows_mount_dir
