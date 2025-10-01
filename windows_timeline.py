@@ -5,10 +5,11 @@ import os
 import re
 import shutil
 import sys
+from argparse import ArgumentError
 from collections.abc import Callable
 from pathlib import Path
 import subprocess
-from typing import Optional
+from typing import Optional, Tuple
 
 LOG_FORMAT = '%(levelname)s: %(message)s'
 
@@ -22,86 +23,91 @@ class MissingToolError(Exception):
         return f"missing '{self.__tool_name}', please {self.__how_to_install}"
 
 
-class Tool(object):
-    def __new__(cls, *tool_names: str, how_to_install: str):
-        for tool_name in tool_names:
-            path = shutil.which(tool_name)
-            if path is not None:
-                self = super(Tool, cls).__new__(cls)
-                self._path = path
-                return self
-        raise MissingToolError(tool_name=tool_name, how_to_install=how_to_install)
+class Tool:
+    def __init__(self, *tool_names: str, how_to_install: str):
+        if tool_names:
+            for tool_name in tool_names:
+                path = shutil.which(tool_name)
+                if path is not None:
+                    self._path = path
+                    return
+            raise MissingToolError(tool_name=tool_names[0], how_to_install=how_to_install)
+        else:
+            raise ArgumentError(message="missing tool name", argument=None)
 
-    def __call__(self, *args: str, output: Optional[Path]=None, filter: Optional[Callable[[str], str]]=None, input: Optional[str]=None) -> str:
+    def __call__(self, *args: str, output: Optional[Path] = None,
+                 filter_function: Optional[Callable[[str], str]] = None, input_str: Optional[str] = None) -> Optional[
+        str]:
         args = list(args)
         args.insert(0, self._path)
-        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input)
+        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input_str)
         if completed_process.returncode != 0:
             logging.error(f"error while running command `{self._path} {args}`:")
             logging.error(completed_process.stderr)
             sys.exit(1)
 
         result = completed_process.stdout
-        if filter is not None:
-            result = filter(result)
+        if filter_function is not None:
+            result = filter_function(result)
 
         if output is None:
             return str(result)
         else:
             with open(output, "w") as f:
                 f.write(result)
+            return None
 
 
-class Toolset(object):
-    _instance = None
+class Toolset:
+    def __init__(self, output_dir: Path):
+        self._rip = None
+        self._mactime2 = None
+        self._mft2bodyfile = None
+        self._regdump = None
+        self._mksquashfs = None
+        self._output_dir = output_dir
 
-    def __new__(cls, output_dir: Path):
-        if cls._instance is None:
-            cls._instance = super(Toolset, cls).__new__(cls)
-            cls._rip = None
-            cls._mactime2 = None
-            cls._mft2bodyfile = None
-            cls._regdump = None
-            cls._mksquashfs = None
-            cls._output_dir = output_dir
-        return cls._instance
-
-    def output(self, file_name: Optional[str]) -> Path:
+    def output(self, file_name: Optional[str]) -> Optional[Path]:
         if file_name is None:
             return None
         else:
             return self._output_dir / file_name
 
-    def rip(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
+    def rip(self, *args: str, output: Optional[str] = None,
+            filter_function: Optional[Callable[[str], str]] = None) -> str:
         if self._rip is None:
             self._rip = Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`')
-        return self._rip(*args, output=self.output(output), filter=filter)
+        return self._rip(*args, output=self.output(output), filter_function=filter_function)
 
-    def mactime2(self, *args: str, input: Optional[str] = None) -> str:
+    def mactime2(self, *args: str, input_str: Optional[str] = None) -> str:
         if self._mactime2 is None:
             self._mactime2 = Tool('mactime2', how_to_install='run `cargo install dfir-toolkit')
-        return self._mactime2(*args, input=input)
+        return self._mactime2(*args, input_str=input_str)
 
-    def regdump(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
+    def regdump(self, *args: str, output: Optional[str] = None,
+                filter_function: Optional[Callable[[str], str]] = None) -> str:
         if self._regdump is None:
             self._regdump = Tool('regdump', how_to_install='run `cargo install nt_hive2')
-        return self._regdump(*args, output=self.output(output), filter=filter)
+        return self._regdump(*args, output=self.output(output), filter_function=filter_function)
 
-    def mft2bodyfile(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
+    def mft2bodyfile(self, *args: str, output: Optional[str] = None,
+                     filter_function: Optional[Callable[[str], str]] = None) -> str:
         if self._mft2bodyfile is None:
             self._mft2bodyfile = Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile')
-        return self._mft2bodyfile(*args, output=self.output(output), filter=filter)
+        return self._mft2bodyfile(*args, output=self.output(output), filter_function=filter_function)
 
-    def mksquashfs(self, *args: str, output: Optional[Path] = None, filter: Optional[Callable[[str], str]] = None) -> str:
+    def mksquashfs(self, *args: str, output: Optional[str] = None,
+                   filter_function: Optional[Callable[[str], str]] = None) -> str:
         if self._mksquashfs is None:
             self._mksquashfs = Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
-        return self._mksquashfs(*args, output=self.output(output), filter=filter)
+        return self._mksquashfs(*args, output=self.output(output), filter_function=filter_function)
 
 
 def tln2csv(content: str, toolset: Toolset) -> str:
     filtered_lines = [line.split("|") for line in content.splitlines() if re.match(r"^\d+\|\w+\|\|\|", line)]
-    content = os.linesep.join(["|".join(("0", line[4], "0", "0", "0", "0", "0", "-1", line[0], "-1", "-1")) for line in filtered_lines])
-    content = toolset.mactime2("-b", "-", "-d", input=content)
+    content = os.linesep.join(
+        ["|".join(("0", line[4], "0", "0", "0", "0", "0", "-1", line[0], "-1", "-1")) for line in filtered_lines])
+    content = toolset.mactime2("-b", "-", "-d", input_str=content)
     return content
 
 
@@ -121,7 +127,7 @@ class WindowsTimeline(object):
 
     @classmethod
     def list_timezones(cls):
-        print(Toolset(None).mactime2("-t", "list"), end="")
+        print(Toolset(Path("/")).mactime2("-t", "list"), end="")
 
     def create(self):
         self.host_info()
@@ -132,35 +138,39 @@ class WindowsTimeline(object):
             self.user_info(user_name, ntuser_dat)
 
     def host_info(self):
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "compname", output="rip_compname.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "timezone", output="rip_timezone.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "shutdown", output="rip_shutdown.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "ips", output="rip_ips.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "usbstor", output="rip_usbstor.txt")
-        self._toolset.rip("-r", self._registry_files['SYSTEM'], "-p", "mountdev2", output="rip_mountdev2.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "compname", output="rip_compname.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "timezone", output="rip_timezone.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "shutdown", output="rip_shutdown.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "ips", output="rip_ips.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "usbstor", output="rip_usbstor.txt")
+        self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "mountdev2", output="rip_mountdev2.txt")
 
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "msis", output="rip_msis.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "winver", output="rip_winver.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "profilelist", output="rip_profilelist.txt")
-        self._toolset.rip("-r", self._registry_files['SOFTWARE'], "-p", "lastloggedon", output="rip_lastloggedon.txt")
+        self._toolset.rip("-r", str(self._registry_files['SOFTWARE']), "-p", "msis", output="rip_msis.txt")
+        self._toolset.rip("-r", str(self._registry_files['SOFTWARE']), "-p", "winver", output="rip_winver.txt")
+        self._toolset.rip("-r", str(self._registry_files['SOFTWARE']), "-p", "profilelist",
+                          output="rip_profilelist.txt")
+        self._toolset.rip("-r", str(self._registry_files['SOFTWARE']), "-p", "lastloggedon",
+                          output="rip_lastloggedon.txt")
 
-        self._toolset.rip("-r", self._registry_files['SAM'], "-p", "samparse", output="rip_samparse.txt")
+        self._toolset.rip("-r", str(self._registry_files['SAM']), "-p", "samparse", output="rip_samparse.txt")
 
     def registry_timeline(self, reg_file: Path):
         filename = reg_file.name
         logging.info(f"creating regripper timeline for {filename} hive")
-        self._toolset.rip("-r", reg_file, "-aT", output=f"tln_{filename}.csv", filter=lambda s: tln2csv(s, self._toolset))
+        self._toolset.rip("-r", str(reg_file), "-aT", output=f"tln_{filename}.csv",
+                          filter_function=lambda s: tln2csv(s, self._toolset))
         logging.info(f"creating regdump timeline for {filename} hive")
-        self._toolset.regdump("-F", "bodyfile", reg_file, output=f"regtln_{filename}.csv", filter=lambda s: self._toolset.mactime2("-b", "-", "-d", input=s))
-
+        self._toolset.regdump("-F", "bodyfile", str(reg_file), output=f"regtln_{filename}.csv",
+                              filter_function=lambda s: self._toolset.mactime2("-b", "-", "-d", input_str=s))
 
     def user_info(self, user_name: str, ntuser_dat: Path):
         logging.info(f"creating regripper timeline for user {user_name}")
-        self._toolset.rip("-r", ntuser_dat, "-p", "run", output=f"rip_{user_name}_run.txt")
-        self._toolset.rip("-r", ntuser_dat, "-p", "cmdproc", output=f"rip_{user_name}_cmdproc.txt")
-        self._toolset.rip("-r", ntuser_dat, "-aT", output=f"tln_user_{user_name}.csv", filter=lambda s: tln2csv(s, self._toolset))
+        self._toolset.rip("-r", str(ntuser_dat), "-p", "run", output=f"rip_{user_name}_run.txt")
+        self._toolset.rip("-r", str(ntuser_dat), "-p", "cmdproc", output=f"rip_{user_name}_cmdproc.txt")
+        self._toolset.rip("-r", str(ntuser_dat), "-aT", output=f"tln_user_{user_name}.csv",
+                          filter_function=lambda s: tln2csv(s, self._toolset))
 
-    def find_user_profiles(self) -> list[(str, Path)]:
+    def find_user_profiles(self) -> list[Tuple[str, Path]]:
         results = list()
         for d in [x for x in self._users_dir.iterdir() if x.is_dir()]:
             for nt_user_dat in [x for x in d.iterdir() if x.is_file()]:
@@ -190,7 +200,7 @@ class WindowsTimeline(object):
         return current_path
 
 
-if __name__ == '__main__':
+def main():
     try:
         parser = argparse.ArgumentParser(
             prog='windows_timeline',
@@ -208,20 +218,24 @@ if __name__ == '__main__':
         parser.add_argument('-v', '--verbose', help="Be verbose", action="store_const", dest="loglevel",
                             const=logging.INFO, )
 
-        args = parser.parse_args()
-        logging.basicConfig(format=LOG_FORMAT, level=args.loglevel)
+        cli_args = parser.parse_args()
+        logging.basicConfig(format=LOG_FORMAT, level=cli_args.loglevel)
 
-        if args.list_timezones:
+        if cli_args.list_timezones:
             WindowsTimeline.list_timezones()
-        elif args.windows_mount_dir is None:
+        elif cli_args.windows_mount_dir is None:
             logging.error("missing Windows mount directory")
-        elif not args.windows_mount_dir.exists():
-            raise NotADirectoryError(args.windows_mount_dir)
+        elif not cli_args.windows_mount_dir.exists():
+            raise NotADirectoryError(cli_args.windows_mount_dir)
         else:
-            output_dir = args.output_dir or "output"
+            output_dir = cli_args.output_dir or "output"
             if not os.path.exists(output_dir):
                 os.mkdir(output_dir)
-            windows_timeline = WindowsTimeline(args.windows_mount_dir, output_dir=Path(output_dir))
+            windows_timeline = WindowsTimeline(cli_args.windows_mount_dir, output_dir=Path(output_dir))
             windows_timeline.create()
     except NotADirectoryError as d:
         logging.error(f"not a directory: {d}")
+
+
+if __name__ == '__main__':
+    main()
