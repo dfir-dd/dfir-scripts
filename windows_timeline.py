@@ -6,10 +6,12 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 from argparse import ArgumentError
 from collections.abc import Callable
 from pathlib import Path
 import subprocess
+from tempfile import tempdir
 from typing import Optional, Tuple
 
 LOG_FORMAT = '%(levelname)s: %(message)s'
@@ -39,11 +41,12 @@ class Tool:
     def __call__(self, *args: str, output: Optional[Path] = None,
                  filter_function: Optional[Callable[[str], str]] = None,
                  input_str: Optional[str] = None,
-                 compress: bool = False) -> Optional[
+                 compress: bool = False,
+                 cwd: Optional[Path] = None) -> Optional[
         str]:
         args = list(args)
         args.insert(0, self._path)
-        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input_str)
+        completed_process = subprocess.run(args, capture_output=True, encoding="UTF-8", input=input_str, cwd=cwd)
         if completed_process.returncode != 0:
             logging.error(f"error while running command `{args}`:")
             logging.error(completed_process.stderr)
@@ -74,9 +77,9 @@ class Toolset:
             def generate_runner(t: Tool):
                 def run_tool(self, *args: str, input_str: Optional[str] = None, output: Optional[str] = None,
                              filter_function: Optional[Callable[[str], str]] = None,
-                             compress: bool = False) -> Optional[str]:
+                             compress: bool = False, cwd: Optional[Path] = None) -> Optional[str]:
                     return t(*args, input_str=input_str, output=self.output(output), filter_function=filter_function,
-                             compress=compress)
+                             compress=compress, cwd=cwd)
 
                 return run_tool
 
@@ -89,12 +92,13 @@ class Toolset:
     'evtx2bodyfile': Tool('evtx2bodyfile', how_to_install='run `cargo install dfir-toolkit'),
     'regdump': Tool('regdump', how_to_install='run `cargo install nt_hive2'),
     'rip': Tool('rip', 'rip.pl', how_to_install='install RegRipper as `rip`'),
+    'hayabusa': Tool('hayabusa', how_to_install='install hayabusa from <https://github.com/Yamato-Security/hayabusa>'),
     # 'mft2bodyfile': Tool('mft2bodyfile', how_to_install='run `cargo install mft2bodyfile'),
     # 'mksquashfs': Tool('mksquashfs', how_to_install='run `sudo apt install squashfs-tools')
 })
 class TimelineToolset:
     def __init__(self, output_dir: Path):
-        self._output_dir = output_dir
+        self._output_dir = output_dir.absolute()
 
     def output(self, file_name: Optional[str]) -> Optional[Path]:
         if file_name is None:
@@ -124,20 +128,25 @@ class WindowsTimeline(object):
         }
         self._users_dir = self.find_file("Users")
         self._winevt_logs = self.find_file("Windows/System32/winevt/Logs")
+
+        # generate a static name for the temp dir, to be able to reuse it on later calls
+        self._tmpdir = Path(tempfile.TemporaryDirectory().name).parent / "windows_timeline"
+        if not self._tmpdir.exists():
+            os.mkdir(str(self._tmpdir))
+        self._hayabusa_rules = Path(str(self._tmpdir)) / "rules"
         return self
 
     @classmethod
     def list_timezones(cls):
         print(TimelineToolset(Path("/")).mactime2("-t", "list"), end="")
 
-    def create(self):
-        self.host_info()
+    def system_registry_timeline(self):
         for reg_file in self._registry_files.values():
             self.registry_timeline(reg_file)
 
+    def user_registry_timeline(self):
         for user_name, ntuser_dat in self.find_user_profiles():
             self.user_info(user_name, ntuser_dat)
-        self.eventlog_timeline()
 
     def host_info(self):
         self._toolset.rip("-r", str(self._registry_files['SYSTEM']), "-p", "compname", output="rip_compname.txt")
@@ -192,6 +201,34 @@ class WindowsTimeline(object):
                                     filter_function=lambda s: self._toolset.mactime2("-b", "-", "-d", input_str=s),
                                     compress=True)
 
+    def hayabusa_timeline(self):
+        logging.info("creating hayabusa timeline")
+        result = self._toolset.hayabusa("csv-timeline",
+                                        "--rules", str(self._hayabusa_rules),
+                                        "--directory", str(self._winevt_logs),
+                                        "--output", str(self._toolset.output("tln_hayabusa.csv")),
+                                        "--HTML-report", str(self._toolset.output("tln_hayabusa_summary.html")),
+                                        "--UTC", "--quiet", "--no-wizard",
+                                        cwd=self._tmpdir)
+
+    def hayabusa_logon_summary(self):
+        logging.info("creating logon summary with hayabusa")
+        self._toolset.hayabusa("logon-summary",
+                               "--directory", str(self._winevt_logs),
+                               "--UTC", "--quiet",
+                               cwd=self._tmpdir,
+                               output="hayabusa_logon_summary.txt")
+
+    def hayabusa_update_rules(self):
+        if not self._hayabusa_rules.exists():
+            logging.info("updating hayabusa rules")
+            self._toolset.hayabusa("update-rules",
+                                   "--rules", str(self._hayabusa_rules))
+
+    def hayabusa_set_profile(self, profile: str):
+        logging.info("use verbose profile for hayabusa")
+        self._toolset.hayabusa("set-default-profile", "--profile", "verbose")
+
     def find_file(self, expected_path: str, fail_if_missing: bool = True) -> Optional[Path]:
         current_path = self._windows_mount_dir
         for part in Path(expected_path).parts:
@@ -218,32 +255,44 @@ def main():
             description='collect timeline information from Windows directories')
         # positional argument
         parser.add_argument('-t', '--timezone', help="convert timestamps from UTC to the given timezone")
-        parser.add_argument('-e', '--extract-evtx', help="extract win event logs in squashfs container")
+        parser.add_argument('-e', '--extract-evtx', help="extract win event logs in squashfs container",
+                            action="store_true")
         parser.add_argument('-i', '--ignore-case',
-                            help="switch to case-insensitive (necessary in case of dissect acquire output)")
-        parser.add_argument('-m', '--parse-mft', help="parse mft (expect $MFT in Windows Root)")
+                            help="switch to case-insensitive (necessary in case of dissect acquire output)",
+                            action="store_true")
+        parser.add_argument('-m', '--parse-mft', help="parse mft (expect $MFT in Windows Root)", action="store_true")
         parser.add_argument('-l', '--list-timezones', help="list available timezones", action="store_true")
-        parser.add_argument('-H', '--execute-hayabusa', help="execute hayabusa")
+        parser.add_argument('-H', '--execute-hayabusa', help="execute hayabusa", action="store_true")
         parser.add_argument('-o', '--output-dir', help="output directory", type=Path)
         parser.add_argument('windows_mount_dir', type=Path, nargs='?')
         parser.add_argument('-v', '--verbose', help="Be verbose", action="store_const", dest="loglevel",
                             const=logging.INFO, )
 
-        cli_args = parser.parse_args()
-        logging.basicConfig(format=LOG_FORMAT, level=cli_args.loglevel)
+        args = parser.parse_args()
+        logging.basicConfig(format=LOG_FORMAT, level=args.loglevel)
 
-        if cli_args.list_timezones:
+        if args.list_timezones:
             WindowsTimeline.list_timezones()
-        elif cli_args.windows_mount_dir is None:
+        elif args.windows_mount_dir is None:
             logging.error("missing Windows mount directory")
-        elif not cli_args.windows_mount_dir.exists():
-            raise NotADirectoryError(cli_args.windows_mount_dir)
+        elif not args.windows_mount_dir.exists():
+            raise NotADirectoryError(args.windows_mount_dir)
         else:
-            output_dir = cli_args.output_dir or "output"
+            output_dir = args.output_dir or "output"
             if not os.path.exists(output_dir):
                 os.mkdir(output_dir)
-            windows_timeline = WindowsTimeline(cli_args.windows_mount_dir, output_dir=Path(output_dir))
-            windows_timeline.create()
+            tln = WindowsTimeline(args.windows_mount_dir, output_dir=Path(output_dir))
+
+            tln.host_info()
+            tln.eventlog_timeline()
+            tln.system_registry_timeline()
+            tln.user_registry_timeline()
+
+            if args.execute_hayabusa:
+                tln.hayabusa_update_rules()
+                tln.hayabusa_set_profile("verbose")
+                tln.hayabusa_timeline()
+                tln.hayabusa_logon_summary()
     except NotADirectoryError as d:
         logging.error(f"not a directory: {d}")
 
